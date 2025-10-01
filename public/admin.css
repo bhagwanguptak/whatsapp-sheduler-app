@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* Reset */
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter',sans-serif; background:#f0f2f5; color:#333; line-height:1.6; }
+
+/* Container with responsive grid */
+.container {
+  max-width: 1200px;
+  margin: 30px auto;
+  padding: 0 15px;
+  display: grid;
+  grid-gap: 30px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+
+/* Card */
+.card {
+  background:#fff;
+  border-radius:16px;
+  padding:25px 30px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  margin-right: 10px;
+}
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow:0 15px 35px rgba(0,0,0,0.12);
+}
+h2 { font-weight:600; margin-bottom:20px; color:#1f2937; font-size:22px; }
+
+/* Inputs & buttons */
+input, textarea, select {
+  width:100%; padding:12px 15px; margin:8px 0;
+  border-radius:12px; border:1px solid #d1d5db;
+  font-size:14px; transition: all 0.2s;
+}
+input:focus, textarea:focus, select:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,0.2); outline:none; }
+button {
+  background:linear-gradient(90deg,#6366f1,#3b82f6);
+  color:#fff; font-weight:600; padding:12px 18px; border:none;
+  border-radius:12px; cursor:pointer; transition: all 0.2s;
+}
+button:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(99,102,241,0.3); }
+
+/* Tables */
+.table-container { overflow-x:auto; }
+table {
+  width:100%; border-collapse: collapse; border-radius:12px; overflow:hidden;
+  box-shadow:0 10px 25px rgba(0,0,0,0.05);
+}
+th, td { padding:12px 15px; font-size:14px; text-align:left; white-space: nowrap; }
+th { background:#6366f1; color:#fff; font-weight:600; }
+tr:nth-child(even){ background:#f9fafb; }
+tr:hover{ background:#e0f2fe; transition: background 0.2s; }
+
+/* Media previews */
+#mediaPreview, #mediaSelectedPreview {
+  max-width:300px; max-height:200px; margin-top:10px;
+  display:none; border-radius:12px; border:1px solid #d1d5db; object-fit:cover;
+  box-shadow:0 5px 15px rgba(0,0,0,0.1);
+}
+
+/* Labels */
+label { font-weight:500; margin-top:10px; display:block; color:#4b5563; }
+
+/* Responsive adjustments */
+@media (max-width:768px) {
+  .container { grid-gap:20px; }
+  #mediaPreview, #mediaSelectedPreview { max-width:100%; max-height:150px; }
+  table { font-size:12px; }
+}
+@media (max-width: 480px) {
+  .container {
+    grid-gap: 20px;
+  }
+}
+

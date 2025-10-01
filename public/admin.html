@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhatsApp Scheduler Admin</title>
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+<div class="container">
+
+    <!-- Upload Media Card -->
+    <div class="card">
+        <h2>Upload Media</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="mediaFile" name="mediaFile" required>
+            <input type="text" id="mediaName" placeholder="Enter media name" required>
+            <select id="mediaType" required>
+                <option value="">Select Type</option>
+                <option value="image">Image</option>
+                <option value="audio">Audio</option>
+            </select>
+            <button type="submit">Upload Media</button>
+        </form>
+        <img id="mediaPreview" src="" alt="Preview">
+    </div>
+
+    <!-- Schedule Message Card -->
+    <div class="card">
+        <h2>Schedule WhatsApp Message</h2>
+        <form id="scheduleForm">
+            <label>Phone Numbers (comma or newline separated)</label>
+            <textarea id="phone_number" rows="3" placeholder="+911234567890, +919876543210" required></textarea>
+
+            <label>Message Text</label>
+            <textarea id="message_text" rows="4" placeholder="Enter your message"></textarea>
+
+            <label>Media</label>
+            <select id="media_id"><option value="">None</option></select>
+            <img id="mediaSelectedPreview" src="" alt="Media Preview">
+
+            <label>Scheduled Time</label>
+            <input type="datetime-local" id="scheduled_time" required>
+            <button type="submit">Schedule Message</button>
+        </form>
+    </div>
+
+    <!-- Scheduled Messages Table -->
+    <div class="card">
+        <h2>Scheduled Messages</h2>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Phone</th>
+                        <th>Text</th>
+                        <th>Media</th>
+                        <th>Preview</th>
+                        <th>Time</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="messagesTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+<script src="admin.js"></script>
+</body>
+</html>
