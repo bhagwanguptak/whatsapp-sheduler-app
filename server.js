@@ -29,7 +29,6 @@ pool.connect()
 // Express app
 const app = express();
 app.use(bodyParser.json());
-app.use(express.static('public')); // Serve admin panel
 
 // Multer setup for file uploads
 const storage = multer.memoryStorage();
