@@ -29,6 +29,8 @@ pool.connect()
 // Express app
 const app = express();
 app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('*', (req,res)=> res.send('404'));
 
 // Multer setup for file uploads
 const storage = multer.memoryStorage();
