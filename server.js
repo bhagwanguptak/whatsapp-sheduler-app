@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
 const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
+const { DateTime } = require('luxon');
 
 dotenv.config({ path: path.resolve(__dirname, 'variables.env') });
 
@@ -107,7 +108,7 @@ app.get('/api/media-library', async (req, res) => {
     }
 });
 
-// --- Upload media to WhatsApp ---
+// --- WhatsApp helper functions ---
 async function uploadMediaToWhatsApp(name, type, buffer) {
     try {
         const formData = new FormData();
@@ -126,7 +127,6 @@ async function uploadMediaToWhatsApp(name, type, buffer) {
     }
 }
 
-// --- Map MIME type to WhatsApp type ---
 function getWhatsAppPayloadType(mimeType) {
     for (const [type, list] of Object.entries(WHATSAPP_ALLOWED_TYPES)) {
         if (list.includes(mimeType)) return type;
@@ -134,7 +134,6 @@ function getWhatsAppPayloadType(mimeType) {
     return 'document';
 }
 
-// --- Send WhatsApp message ---
 async function sendWhatsAppMessage(to, text, mediaRow = null, msgId = null) {
     const logPrefix = `📤 Message ID ${msgId || ''} to ${to}`;
     const payload = { messaging_product: 'whatsapp', to };
@@ -147,10 +146,7 @@ async function sendWhatsAppMessage(to, text, mediaRow = null, msgId = null) {
 
             const waType = getWhatsAppPayloadType(mediaRow.type);
             payload.type = waType;
-            payload[waType] = {
-                id: mediaId,
-                caption: text || ""  // ✅ Include text as caption
-            };
+            payload[waType] = { id: mediaId, caption: text || "" };
             console.log(`${logPrefix} | Media uploaded successfully. WhatsApp mediaId: ${mediaId}`);
         } else {
             payload.type = 'text';
@@ -171,7 +167,7 @@ async function sendWhatsAppMessage(to, text, mediaRow = null, msgId = null) {
     }
 }
 
-// --- Scheduler helpers ---
+// --- Scheduler ---
 async function sendAndMark(msg) {
     try {
         const mediaRow = msg.media_id
@@ -180,13 +176,12 @@ async function sendAndMark(msg) {
 
         const success = await sendWhatsAppMessage(msg.phone_number, msg.message_text, mediaRow, msg.id);
 
-        if (success) {
-            await pool.query("UPDATE scheduled_messages SET status='sent' WHERE id=$1", [msg.id]);
-            console.log(`🟢 Scheduled message ID ${msg.id} marked as 'sent'`);
-        } else {
-            await pool.query("UPDATE scheduled_messages SET status='failed' WHERE id=$1", [msg.id]);
-            console.log(`🔴 Scheduled message ID ${msg.id} marked as 'failed'`);
-        }
+        await pool.query(
+            "UPDATE scheduled_messages SET status=$1 WHERE id=$2",
+            [success ? 'sent' : 'failed', msg.id]
+        );
+
+        console.log(`${success ? '🟢' : '🔴'} Scheduled message ID ${msg.id} marked as ${success ? 'sent' : 'failed'}`);
     } catch (err) {
         console.error(`❌ Error sending scheduled message ID ${msg.id}:`, err.message);
         await pool.query("UPDATE scheduled_messages SET status='failed' WHERE id=$1", [msg.id]);
@@ -194,43 +189,53 @@ async function sendAndMark(msg) {
 }
 
 function scheduleMessage(msg) {
-    const now = new Date();
-    const scheduledTime = new Date(msg.scheduled_time);
-    const delay = scheduledTime - now;
+    const now = DateTime.now().setZone('Asia/Kolkata').toJSDate();
+    const scheduledDate = DateTime.fromJSDate(msg.scheduled_time, { zone: 'Asia/Kolkata' }).toJSDate();
+    const delay = scheduledDate - now;
 
     if (delay <= 0) sendAndMark(msg);
     else {
         setTimeout(() => sendAndMark(msg), delay);
-        console.log(`⏳ Scheduled message ID ${msg.id} will run at ${scheduledTime.toISOString()} (in ${Math.round(delay/1000)}s)`);
+        console.log(`⏳ Scheduled message ID ${msg.id} will run at ${scheduledDate.toLocaleString()} IST (in ${Math.round(delay/1000)}s)`);
     }
 }
 
-// --- Initialize pending messages ---
 async function initPendingMessages() {
     try {
-        const now = new Date();
-        const res = await pool.query("SELECT * FROM scheduled_messages WHERE status='pending' AND scheduled_time >= $1", [now]);
-        for (const msg of res.rows) scheduleMessage(msg);
+        const nowUTC = DateTime.now().toUTC().toJSDate();
+        const res = await pool.query("SELECT * FROM scheduled_messages WHERE status='pending' AND scheduled_time >= $1", [nowUTC]);
+        for (const msg of res.rows) {
+            const scheduledDateIST = DateTime.fromISO(msg.scheduled_time, { zone: 'UTC' })
+                                              .setZone('Asia/Kolkata')
+                                              .toJSDate();
+            scheduleMessage({ ...msg, scheduled_time: scheduledDateIST });
+        }
     } catch (err) {
         console.error('❌ Error initializing pending messages:', err.message);
     }
 }
 initPendingMessages();
 
-// --- Schedule new message ---
+// --- API to schedule message ---
 app.post('/api/schedule-message', async (req, res) => {
     try {
         const { phone_number, message_text, media_id, scheduled_time } = req.body;
         if (!phone_number || !scheduled_time) return res.json({ success: false, error: 'Missing required fields' });
 
+        const scheduledUTC = DateTime.fromISO(scheduled_time, { zone: 'Asia/Kolkata' }).toUTC().toISO();
+
         const result = await pool.query(
             "INSERT INTO scheduled_messages(phone_number,message_text,media_id,scheduled_time,status) VALUES($1,$2,$3,$4,'pending') RETURNING *",
-            [phone_number, message_text, media_id || null, scheduled_time]
+            [phone_number, message_text, media_id || null, scheduledUTC]
         );
         const newMsg = result.rows[0];
-        scheduleMessage(newMsg);
 
-        console.log(`🗓 Scheduled message ID ${newMsg.id} for ${phone_number} at ${scheduled_time}`);
+        const scheduledDateIST = DateTime.fromISO(newMsg.scheduled_time, { zone: 'UTC' })
+                                          .setZone('Asia/Kolkata')
+                                          .toJSDate();
+        scheduleMessage({ ...newMsg, scheduled_time: scheduledDateIST });
+
+        console.log(`🗓 Scheduled message ID ${newMsg.id} for ${phone_number} at ${scheduled_time} IST`);
         res.json({ success: true });
     } catch (err) {
         console.error('❌ Schedule message error:', err.message);
