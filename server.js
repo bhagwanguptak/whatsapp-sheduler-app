@@ -15,8 +15,9 @@ const PORT = process.env.PORT || 3000;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
+const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 
-if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID || !DATABASE_URL) {
+if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID || !DATABASE_URL || !WHATSAPP_VERIFY_TOKEN) {
   console.error("❌ Missing essential environment variables. Check variables.env!");
   process.exit(1);
 }
@@ -24,13 +25,13 @@ if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID || !DATABASE_URL) {
 // --- PostgreSQL connection ---
 const pool = new Pool({ connectionString: DATABASE_URL });
 pool.connect()
-  .then(client => { 
-    console.log('✅ Connected to Postgres database successfully.'); 
-    client.release(); 
+  .then(client => {
+    console.log('✅ Connected to Postgres database successfully.');
+    client.release();
   })
-  .catch(err => { 
-    console.error('❌ Failed to connect to Postgres database:', err.message); 
-    process.exit(1); 
+  .catch(err => {
+    console.error('❌ Failed to connect to Postgres database:', err.message);
+    process.exit(1);
   });
 
 // --- Express app ---
@@ -38,11 +39,11 @@ const app = express();
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Multer setup for file uploads
+// --- Multer setup for file uploads ---
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// WhatsApp allowed MIME types
+// --- WhatsApp allowed MIME types ---
 const WHATSAPP_ALLOWED_TYPES = {
   image: ['image/jpeg', 'image/png', 'image/webp'],
   video: ['video/mp4', 'video/3gpp'],
@@ -54,7 +55,7 @@ const WHATSAPP_ALLOWED_TYPES = {
       'text/plain','application/vnd.ms-excel']
 };
 
-// --- Database Tables ---
+// --- Create tables if not exists ---
 async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS media_library (
@@ -140,24 +141,20 @@ function getWhatsAppPayloadType(mimeType) {
   return 'document';
 }
 
-async function sendWhatsAppMessage(to, text, mediaRow = null, msgId = null) {
-  const logPrefix = `📤 Message ID ${msgId || ''} to ${to}`;
+async function sendWhatsAppMessage(to, text, mediaRow = null) {
   const payload = { messaging_product: 'whatsapp', to };
 
   try {
     if (mediaRow) {
-      console.log(`${logPrefix} | Uploading media: ${mediaRow.name} (${mediaRow.type})...`);
       const mediaId = await uploadMediaToWhatsApp(mediaRow.name, mediaRow.type, mediaRow.content);
       if (!mediaId) throw new Error('Media upload failed');
 
       const waType = getWhatsAppPayloadType(mediaRow.type);
       payload.type = waType;
       payload[waType] = { id: mediaId, caption: text || "" };
-      console.log(`${logPrefix} | Media uploaded successfully. WhatsApp mediaId: ${mediaId}`);
     } else {
       payload.type = 'text';
       payload.text = { body: text };
-      console.log(`${logPrefix} | Sending text: "${text}"`);
     }
 
     const resp = await axios.post(
@@ -166,16 +163,15 @@ async function sendWhatsAppMessage(to, text, mediaRow = null, msgId = null) {
       { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
     );
 
-    console.log("📩 WhatsApp API response:", JSON.stringify(resp.data, null, 2));
-    console.log(`✅ ${logPrefix} sent successfully`);
-    return true;
+    console.log('📩 WhatsApp API response:', JSON.stringify(resp.data, null, 2));
+    return resp.data.messages?.[0]?.id || null;
   } catch (err) {
-    console.error(`❌ ${logPrefix} failed:`, err.response?.data || err.message);
-    return false;
+    console.error('❌ Send WhatsApp message error:', err.response?.data || err.message);
+    return null;
   }
 }
 
-// --- API to schedule message ---
+// --- Schedule message ---
 app.post('/api/schedule-message', async (req, res) => {
   try {
     const { phone_number, message_text, media_id, scheduled_time } = req.body;
@@ -183,13 +179,13 @@ app.post('/api/schedule-message', async (req, res) => {
 
     const scheduledUTC = DateTime.fromISO(scheduled_time, { zone: 'Asia/Kolkata' }).toUTC().toISO();
 
-    await pool.query(
-      "INSERT INTO scheduled_messages(phone_number,message_text,media_id,scheduled_time,status) VALUES($1,$2,$3,$4,'pending')",
+    const result = await pool.query(
+      "INSERT INTO scheduled_messages(phone_number,message_text,media_id,scheduled_time,status) VALUES($1,$2,$3,$4,'pending') RETURNING *",
       [phone_number, message_text, media_id || null, scheduledUTC]
     );
 
-    console.log(`🗓 Message scheduled for ${phone_number} at ${scheduled_time} IST`);
-    res.json({ success: true });
+    console.log(`🗓 Scheduled message ID ${result.rows[0].id} for ${phone_number} at ${scheduled_time} IST`);
+    res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('❌ Schedule message error:', err.message);
     res.json({ success: false, error: err.message });
@@ -212,7 +208,7 @@ app.get('/api/scheduled-messages', async (req, res) => {
   }
 });
 
-// --- Check pending messages endpoint (for external cron) ---
+// --- Process pending messages (for cron) ---
 async function processDueMessages() {
   try {
     const nowUTC = DateTime.now().toUTC().toISO();
@@ -227,16 +223,15 @@ async function processDueMessages() {
           ? await pool.query("SELECT * FROM media_library WHERE id=$1", [msg.media_id]).then(r => r.rows[0])
           : null;
 
-        const success = await sendWhatsAppMessage(msg.phone_number, msg.message_text, mediaRow, msg.id);
+        const messageId = await sendWhatsAppMessage(msg.phone_number, msg.message_text, mediaRow);
 
         await pool.query(
           "UPDATE scheduled_messages SET status=$1 WHERE id=$2",
-          [success ? 'sent' : 'failed', msg.id]
+          [messageId ? 'sent' : 'failed', msg.id]
         );
-
-        console.log(`📤 Sent scheduled message ID ${msg.id}`);
+        console.log(`📤 Processed scheduled message ID ${msg.id}`);
       } catch (err) {
-        console.error(`❌ Error sending scheduled message ID ${msg.id}:`, err.message);
+        console.error(`❌ Error processing scheduled message ID ${msg.id}:`, err.message);
         await pool.query("UPDATE scheduled_messages SET status='failed' WHERE id=$1", [msg.id]);
       }
     }
@@ -250,7 +245,57 @@ app.get('/api/check-pending', async (req, res) => {
   res.json({ success: true });
 });
 
-// --- Start server (for local testing) ---
+// --- Webhook verification ---
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode && token) {
+    if (mode === 'subscribe' && token === WHATSAPP_VERIFY_TOKEN) {
+      console.log('✅ Webhook verified successfully');
+      res.status(200).send(challenge);
+    } else {
+      console.warn('❌ Webhook verification failed');
+      res.sendStatus(403);
+    }
+  } else {
+    res.sendStatus(400);
+  }
+});
+
+// --- Webhook POST endpoint ---
+app.post('/webhook', async (req, res) => {
+  console.log('📩 Webhook received:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const entries = req.body.entry || [];
+    for (const entry of entries) {
+      const changes = entry.changes || [];
+      for (const change of changes) {
+        const statuses = change.value.statuses || [];
+        for (const status of statuses) {
+          const messageId = status.id;
+          const messageStatus = status.status; // sent, delivered, read, failed
+
+          console.log(`Message ${messageId} status: ${messageStatus}`);
+
+          // Update DB using the WhatsApp message ID
+          await pool.query(
+            "UPDATE scheduled_messages SET status=$1 WHERE id=$2",
+            [messageStatus === 'delivered' || messageStatus === 'read' ? 'sent' : 'failed', messageId]
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.error('❌ Error processing webhook:', err.message);
+  }
+
+  res.sendStatus(200);
+});
+
+// --- Start server ---
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`💻 Admin panel: http://localhost:${PORT}/admin`);
