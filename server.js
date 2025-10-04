@@ -212,8 +212,8 @@ app.get('/api/scheduled-messages', async (req, res) => {
   }
 });
 
-// --- CRON ENDPOINT (Vercel Cron Job will call this) ---
-app.get('/api/run-scheduler', async (req, res) => {
+// --- Check pending messages endpoint (for external cron) ---
+async function processDueMessages() {
   try {
     const nowUTC = DateTime.now().toUTC().toISO();
     const pending = await pool.query(
@@ -221,12 +221,6 @@ app.get('/api/run-scheduler', async (req, res) => {
       [nowUTC]
     );
 
-    if (pending.rows.length === 0) {
-      console.log("⏳ No messages to send right now.");
-      return res.json({ success: true, processed: 0 });
-    }
-
-    let sentCount = 0;
     for (const msg of pending.rows) {
       try {
         const mediaRow = msg.media_id
@@ -240,19 +234,20 @@ app.get('/api/run-scheduler', async (req, res) => {
           [success ? 'sent' : 'failed', msg.id]
         );
 
-        sentCount++;
-        console.log(`🟢 Scheduled message ID ${msg.id} -> ${success ? "sent" : "failed"}`);
+        console.log(`📤 Sent scheduled message ID ${msg.id}`);
       } catch (err) {
         console.error(`❌ Error sending scheduled message ID ${msg.id}:`, err.message);
         await pool.query("UPDATE scheduled_messages SET status='failed' WHERE id=$1", [msg.id]);
       }
     }
-
-    res.json({ success: true, processed: sentCount });
   } catch (err) {
-    console.error("❌ Scheduler error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
+    console.error("❌ processDueMessages error:", err.message);
   }
+}
+
+app.get('/api/check-pending', async (req, res) => {
+  await processDueMessages();
+  res.json({ success: true });
 });
 
 // --- Start server (for local testing) ---
