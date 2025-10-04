@@ -154,11 +154,13 @@ async function sendWhatsAppMessage(to, text, mediaRow = null, msgId = null) {
             console.log(`${logPrefix} | Sending text: "${text}"`);
         }
 
-        await axios.post(
+        const resp = await axios.post(
             `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`,
             payload,
             { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
         );
+        
+        console.log("📩 WhatsApp API response:", resp.data);
         console.log(`✅ ${logPrefix} sent successfully`);
         return true;
     } catch (err) {
